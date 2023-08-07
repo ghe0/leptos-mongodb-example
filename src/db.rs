@@ -33,3 +33,9 @@ pub async fn get_members() -> Result<Vec<Member>, mongodb::error::Error> {
     }
     Ok(members)
 }
+
+pub async fn add_member(username: String) -> Result<(),  mongodb::error::Error> {
+    let member = Member { username };
+    members_coll().insert_one(member, None).await?;
+    Ok(())
+}
