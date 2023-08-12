@@ -4,8 +4,12 @@ pub mod app;
 pub mod model;
 use cfg_if::cfg_if;
 
-#[cfg(feature = "ssr")]
-pub mod db;
+cfg_if! {
+if #[cfg(feature = "ssr")] {
+    pub mod db;
+    pub mod jwt;
+}
+}
 
 cfg_if! {
 if #[cfg(feature = "hydrate")] {
