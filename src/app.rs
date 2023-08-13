@@ -3,7 +3,7 @@ use leptos_meta::*;
 use leptos_router::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{model, model::Member};
+use crate::model::{Member, Post};
 
 #[component]
 pub fn App(cx: Scope) -> impl IntoView {
@@ -48,6 +48,7 @@ fn HomePage(cx: Scope) -> impl IntoView {
         <h1>"homepage header"</h1>
         <Register/>
         <Login/>
+        <Post/>
         <Suspense fallback=move || view! { cx, <p>"Loading posts..."</p> }>
             <ul>{posts_view}</ul>
         </Suspense>
@@ -102,9 +103,21 @@ fn Login(cx: Scope) -> impl IntoView {
     }
 }
 
-#[derive(Params, Copy, Clone, Debug, PartialEq, Eq)]
-pub struct PostParams {
-    id: usize,
+#[component]
+fn Post(cx: Scope) -> impl IntoView {
+    let add_post = create_server_multi_action::<AddPost>(cx);
+    view! { cx,
+        <h3>Add a post</h3>
+        <MultiActionForm
+            action=add_post
+        >
+            <label>
+                "post text"
+                <input type="text" name="text"/>
+            </label>
+            <input type="submit" value="Add"/>
+        </MultiActionForm>
+    }
 }
 
 #[server(Register, "/api", "Cbor")]
@@ -114,7 +127,6 @@ pub async fn register(username: String, password: String) -> Result<(), ServerFn
 
 #[server(Login, "/api", "Cbor")]
 pub async fn login(cx: Scope, username: String, password: String) -> Result<(), ServerFnError> {
-    log!("logging in {username}");
     use actix_session::Session;
     use chrono::prelude::*;
     use leptos_actix::extract;
@@ -133,10 +145,35 @@ pub async fn login(cx: Scope, username: String, password: String) -> Result<(), 
 }
 
 #[server(GetPosts, "/api", "Cbor")]
-pub async fn get_posts() -> Result<Vec<model::Post>, ServerFnError> {
+pub async fn get_posts() -> Result<Vec<Post>, ServerFnError> {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let posts = crate::db::get_posts().await?;
     Ok(posts)
+}
+
+#[server(AddPost, "/api", "Cbor")]
+pub async fn add_post(cx: Scope, text: String) -> Result<String, ServerFnError> {
+    use actix_session::Session;
+    use chrono::prelude::*;
+    use leptos_actix::extract;
+    #[derive(Serialize, Deserialize)]
+    pub struct Token {
+        username: String,
+        exp: DateTime<Utc>,
+    }
+    let session = extract(cx, |session: Session| async move { session }).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    if let Some(token) = session.get::<Token>("token")? {
+        if token.exp.lt(&Utc::now()) {
+            Ok("token expired".to_string())
+        } else {
+            crate::db::add_post(Post { text }).await?;
+            Ok("ok".to_string())
+        }
+    } else {
+        Ok("Login required!".to_string())
+    }
 }
 
 #[component]
