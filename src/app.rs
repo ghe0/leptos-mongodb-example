@@ -1,7 +1,6 @@
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
-use serde::{Deserialize, Serialize};
 
 use crate::model::{Member, Post};
 
@@ -120,60 +119,30 @@ fn Post(cx: Scope) -> impl IntoView {
     }
 }
 
-#[server(Register, "/api", "Cbor")]
+#[server(Register, "/api")]
 pub async fn register(username: String, password: String) -> Result<(), ServerFnError> {
     Ok(crate::db::add_member(Member { username, password }).await?)
 }
 
-#[server(Login, "/api", "Cbor")]
+#[server(Login, "/api")]
 pub async fn login(cx: Scope, username: String, password: String) -> Result<(), ServerFnError> {
-    use actix_session::Session;
-    use chrono::prelude::*;
-    use leptos_actix::extract;
-    #[derive(Serialize, Deserialize)]
-    pub struct Token {
-        username: String,
-        exp: DateTime<Utc>,
-    }
     crate::db::auth_member(&username, &password).await?;
-    let exp = Utc::now().checked_add_signed(chrono::Duration::minutes(1)).unwrap();
-    let token = Token { username, exp };
-
-    let session = extract(cx, |session: Session| async move { session }).await.unwrap();
-    session.insert("token", token)?;
+    crate::auth::login(cx, username).await?;
     Ok(())
 }
 
-#[server(GetPosts, "/api", "Cbor")]
+#[server(GetPosts, "/api")]
 pub async fn get_posts() -> Result<Vec<Post>, ServerFnError> {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     let posts = crate::db::get_posts().await?;
     Ok(posts)
 }
 
-#[server(AddPost, "/api", "Cbor")]
-pub async fn add_post(cx: Scope, text: String) -> Result<String, ServerFnError> {
-    use actix_session::Session;
-    use chrono::prelude::*;
-    use leptos_actix::extract;
-    #[derive(Serialize, Deserialize)]
-    pub struct Token {
-        username: String,
-        exp: DateTime<Utc>,
-    }
-    let session = extract(cx, |session: Session| async move { session }).await.unwrap();
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    if let Some(token) = session.get::<Token>("token")? {
-        if token.exp.lt(&Utc::now()) {
-            Ok("token expired".to_string())
-        } else {
-            crate::db::add_post(Post { text }).await?;
-            Ok("ok".to_string())
-        }
-    } else {
-        Ok("Login required!".to_string())
-    }
+#[server(AddPost, "/api")]
+pub async fn add_post(cx: Scope, text: String) -> Result<(), ServerFnError> {
+    crate::auth::verify(cx).await?;
+    crate::db::add_post(Post { text }).await?;
+    Ok(())
 }
 
 #[component]

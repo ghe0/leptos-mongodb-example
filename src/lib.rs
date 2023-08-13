@@ -7,7 +7,7 @@ use cfg_if::cfg_if;
 cfg_if! {
 if #[cfg(feature = "ssr")] {
     pub mod db;
-    // pub mod jwt;
+    pub mod auth;
 }
 }
 
