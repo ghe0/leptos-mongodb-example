@@ -1,9 +1,9 @@
-use crate::model;
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
+
+use crate::{model, model::Member};
 
 #[component]
 pub fn App(cx: Scope) -> impl IntoView {
@@ -35,45 +35,67 @@ pub fn App(cx: Scope) -> impl IntoView {
 
 #[component]
 fn HomePage(cx: Scope) -> impl IntoView {
-    let members =
-        create_resource(cx, || (), |_| async { get_members().await });
-    let users_view = move || {
-        members.with(cx, |members| members
-            .clone()
-            .map(|members| {
-                members.iter()
-                .map(|m| view! { cx, <li>{&m.username}</li>})
-                .collect_view(cx)
-            })
-        )
+    let posts = create_resource(cx, || (), |_| async { get_posts().await });
+    let posts_view = move || {
+        posts.with(cx, |posts| {
+            posts
+                .clone()
+                .map(|posts| posts.iter().map(|m| view! { cx, <li>{&m.text}</li>}).collect_view(cx))
+        })
     };
 
     view! { cx,
         <h1>"homepage header"</h1>
-        <AddMember/>
-        <Suspense fallback=move || view! { cx, <p>"Loading members..."</p> }>
-            <ul>{users_view}</ul>
+        <Register/>
+        <Login/>
+        <Suspense fallback=move || view! { cx, <p>"Loading posts..."</p> }>
+            <ul>{posts_view}</ul>
         </Suspense>
     }
 }
 
 #[component]
-fn AddMember(cx: Scope) -> impl IntoView {
-    let add_member = create_server_multi_action::<AddMember>(cx);
-
+fn Register(cx: Scope) -> impl IntoView {
+    let register = create_server_multi_action::<Register>(cx);
     view! { cx,
+        <h3>Register</h3>
         <MultiActionForm
             on:submit=move |ev| {
-                let data = AddMember::from_event(&ev).expect("to parse form data");
+                let data = Register::from_event(&ev).expect("to parse form data");
                 if data.username.contains(" ") {
                     ev.prevent_default();
                 }
             }
-            action=add_member
+            action=register
         >
             <label>
-                "Add a member"
+                "Register"
                 <input type="text" name="username"/>
+                <input type="password" name="password"/>
+            </label>
+            <input type="submit" value="Add"/>
+        </MultiActionForm>
+    }
+}
+
+#[component]
+fn Login(cx: Scope) -> impl IntoView {
+    let login = create_server_multi_action::<Login>(cx);
+    view! { cx,
+        <h3>Login</h3>
+        <MultiActionForm
+            on:submit=move |ev| {
+                let data = Login::from_event(&ev).expect("to parse form data");
+                if data.username.contains(" ") {
+                    ev.prevent_default();
+                }
+            }
+            action=login
+        >
+            <label>
+                "Login"
+                <input type="text" name="username"/>
+                <input type="password" name="password"/>
             </label>
             <input type="submit" value="Add"/>
         </MultiActionForm>
@@ -85,26 +107,36 @@ pub struct PostParams {
     id: usize,
 }
 
-#[server(GetMembers, "/api", "Cbor")]
-pub async fn get_members() -> Result<Vec<model::Member>, ServerFnError> {
+#[server(Register, "/api", "Cbor")]
+pub async fn register(username: String, password: String) -> Result<(), ServerFnError> {
+    Ok(crate::db::add_member(Member { username, password }).await?)
+}
+
+#[server(Login, "/api", "Cbor")]
+pub async fn login(cx: Scope, username: String, password: String) -> Result<(), ServerFnError> {
+    log!("logging in {username}");
+    use actix_session::Session;
+    use chrono::prelude::*;
+    use leptos_actix::extract;
+    #[derive(Serialize, Deserialize)]
+    pub struct Token {
+        username: String,
+        exp: DateTime<Utc>,
+    }
+    crate::db::auth_member(&username, &password).await?;
+    let exp = Utc::now().checked_add_signed(chrono::Duration::minutes(1)).unwrap();
+    let token = Token { username, exp };
+
+    let session = extract(cx, |session: Session| async move { session }).await.unwrap();
+    session.insert("token", token)?;
+    Ok(())
+}
+
+#[server(GetPosts, "/api", "Cbor")]
+pub async fn get_posts() -> Result<Vec<model::Post>, ServerFnError> {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    let members = crate::db::get_members().await?;
-    Ok(members)
-}
-
-#[server(AddMember, "/api", "Cbor")]
-pub async fn add_member(username: String) -> Result<(), ServerFnError> {
-    Ok(crate::db::add_member(username).await?)
-}
-
-#[derive(Error, Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GetError {
-    #[error("Invalid object ID.")]
-    InvalidId,
-    #[error("Object not found.")]
-    PostNotFound,
-    #[error("Server error.")]
-    ServerError,
+    let posts = crate::db::get_posts().await?;
+    Ok(posts)
 }
 
 #[component]
